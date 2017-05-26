@@ -15,8 +15,9 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btn).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                Curl.test();
+                Curl.dump("https://vap.gw.weidian.com/com.vdian.sword/appconf/getConfig/1.1");
             }
         });
+
     }
 }

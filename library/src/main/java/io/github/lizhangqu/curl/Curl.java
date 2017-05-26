@@ -11,4 +11,6 @@ public class Curl {
     }
 
     public static native void test();
+
+    public static native void dump(String url);
 }

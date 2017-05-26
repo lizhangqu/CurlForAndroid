@@ -5,10 +5,157 @@
 #include "native.h"
 #include "log.h"
 #include "iostream"
+#include <sstream>
+#include <cmath>
 #include "string"
 #include "vector"
 #include "curl/curl.h"
 
+static std::string formatJson(char *json) {
+    std::string pretty;
+
+    if (json == NULL || strlen(json) == 0) {
+        return pretty;
+    }
+
+    std::string str = std::string(json);
+    bool quoted = false;
+    bool escaped = false;
+    std::string INDENT = "    ";
+    int indent = 0;
+    int length = (int) str.length();
+    int i;
+
+    for (i = 0; i < length; i++) {
+        char ch = str[i];
+
+        switch (ch) {
+            case '{':
+            case '[':
+                pretty += ch;
+
+                if (!quoted) {
+                    pretty += "\n";
+
+                    if (!(str[i + 1] == '}' || str[i + 1] == ']')) {
+                        ++indent;
+
+                        for (int j = 0; j < indent; j++) {
+                            pretty += INDENT;
+                        }
+                    }
+                }
+
+                break;
+
+            case '}':
+            case ']':
+                if (!quoted) {
+                    if ((i > 0) && (!(str[i - 1] == '{' || str[i - 1] == '['))) {
+                        pretty += "\n";
+
+                        --indent;
+
+                        for (int j = 0; j < indent; j++) {
+                            pretty += INDENT;
+                        }
+                    } else if ((i > 0) && ((str[i - 1] == '[' && ch == ']') ||
+                                           (str[i - 1] == '{' && ch == '}'))) {
+                        for (int j = 0; j < indent; j++) {
+                            pretty += INDENT;
+                        }
+                    }
+                }
+
+                pretty += ch;
+
+                break;
+
+            case '"':
+                pretty += ch;
+                escaped = false;
+
+                if (i > 0 && str[i - 1] == '\\') {
+                    escaped = !escaped;
+                }
+
+                if (!escaped) {
+                    quoted = !quoted;
+                }
+
+                break;
+
+            case ',':
+                pretty += ch;
+
+                if (!quoted) {
+                    pretty += "\n";
+
+                    for (int j = 0; j < indent; j++) {
+                        pretty += INDENT;
+                    }
+                }
+
+                break;
+
+            case ':':
+                pretty += ch;
+
+                if (!quoted) {
+                    pretty += " ";
+                }
+
+                break;
+
+            default:
+                pretty += ch;
+
+                break;
+        }
+    }
+
+    return pretty;
+}
+
+
+static size_t header_callback(char *buffer, size_t size,
+                              size_t nitems, void *userdata) {
+    ALOGE("Header:%s", buffer);
+    return nitems * size;
+}
+
+static size_t write_callback(char *buffer, size_t size, size_t nmemb, void *userdata) {
+//    const std::string &string = formatJson(buffer);
+    ALOGE("%s", buffer);
+    return nmemb * size;
+}
+
+void dump(JNIEnv *env, jobject thiz, jstring jurl) {
+    char *url = (char *) env->GetStringUTFChars(jurl, NULL);
+    CURL *curl;
+    CURLcode res;
+    curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10); // 10 s connect timeout
+        curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        res = curl_easy_perform(curl);
+        if (CURLE_OK == res) {
+            ALOGE("success send request: %s", url);
+        } else {
+            const char *easy_error = curl_easy_strerror(res);
+            ALOGE("success send request :%s . error code %d. error msg: %s", url, res, easy_error);
+        }
+        curl_easy_cleanup(curl);
+    }
+    env->ReleaseStringUTFChars(jurl, url);
+}
 
 void test(JNIEnv *env, jobject thiz) {
 
@@ -69,11 +216,14 @@ void test(JNIEnv *env, jobject thiz) {
     CURLcode res;
     curl = curl_easy_init();
     if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, "https://nghttp2.org");
+        curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10); // 10 s connect timeout
         curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+        curl_easy_setopt(curl, CURLOPT_URL, "https://nghttp2.org");
         res = curl_easy_perform(curl);
         if (CURLE_OK == res) {
             char *ct;
@@ -99,8 +249,9 @@ void test(JNIEnv *env, jobject thiz) {
                 } else if (http_version_code == CURL_HTTP_VERSION_LAST) {
                     ALOGE("ILLEGAL* http version");
                 }
-            }
 
+
+            }
         } else {
             const char *easy_error = curl_easy_strerror(res);
             std::cout << easy_error << std::endl;
@@ -118,6 +269,12 @@ static const JNINativeMethod sMethods[] = {
                 const_cast<char *>("()V"),
                 reinterpret_cast<void *>(test)
         },
+        {
+                const_cast<char *>("dump"),
+                const_cast<char *>("(Ljava/lang/String;)V"),
+                reinterpret_cast<void *>(dump)
+        },
+
 
 };
 
